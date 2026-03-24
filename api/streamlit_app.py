@@ -1,7 +1,12 @@
 import streamlit as st
 import pickle
 import pandas as pd
-
+import pickle
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import Ridge
+from sklearn.ensemble import RandomForestRegressor
+# any other transformers/models you used
 # -------------------------------
 # Load model
 # -------------------------------
