@@ -1,10 +1,19 @@
 import streamlit as st
-import requests
+import pandas as pd
+import pickle
 
 st.set_page_config(page_title="House Price Predictor", layout="centered")
-
 st.title("🏠 House Price Prediction")
 
+# -----------------------------
+# Load the trained pipeline
+# -----------------------------
+with open("models/model.pkl", "rb") as f:
+    model_pipeline = pickle.load(f)
+
+# -----------------------------
+# User Inputs
+# -----------------------------
 MSSubClass = st.number_input("MSSubClass", value=20)
 LotArea = st.number_input("LotArea", value=8000)
 OverallQual = st.slider("Overall Quality", 1, 10, 5)
@@ -20,9 +29,11 @@ GarageCars = st.number_input("Garage Cars", value=2)
 GarageArea = st.number_input("Garage Area", value=500)
 YrSold = st.number_input("Year Sold", value=2008)
 
+# -----------------------------
+# Prediction
+# -----------------------------
 if st.button("🚀 Predict Price"):
-
-    data = {
+    input_data = pd.DataFrame([{
         "MSSubClass": MSSubClass,
         "LotArea": LotArea,
         "OverallQual": OverallQual,
@@ -37,18 +48,10 @@ if st.button("🚀 Predict Price"):
         "GarageCars": GarageCars,
         "GarageArea": GarageArea,
         "YrSold": YrSold
-    }
+    }])
 
-    response = requests.post(
-        "http://127.0.0.1:8000/predict",
-        json=data
-    )
-
-    if response.status_code == 200:
-        result = response.json()
-        if "price" in result:
-            st.success(f"💰 Estimated Price: ${result['price']:,.2f}")
-        else:
-            st.error(result)
-    else:
-        st.error("API error")
+    try:
+        pred = model_pipeline.predict(input_data)[0]
+        st.success(f"💰 Estimated Price: ${pred:,.2f}")
+    except Exception as e:
+        st.error(f"Prediction failed: {e}")
