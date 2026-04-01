@@ -114,6 +114,7 @@ house-price-ml/
 │
 ├── data/
 │   └── train.csv
+│    └── test.csv
 │
 ├── requirements.txt
 └── README.md
