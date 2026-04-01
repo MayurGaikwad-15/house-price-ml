@@ -228,7 +228,7 @@ streamlit run app/streamlit_app.py
 ## 👨‍💻 Author
 
 **Mayur**
-Aspiring AI/ML Engineer
+ AI/ML Engineer
 
 ---
 
