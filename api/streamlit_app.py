@@ -1,15 +1,19 @@
 import streamlit as st
-import pickle
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
-from sklearn.linear_model import Ridge
-from sklearn.ensemble import RandomForestRegressor
-# any other transformers/models you used
-import requests
+import pandas as pd
+import numpy as np
+import joblib
 
 st.set_page_config(page_title="House Price Predictor", layout="centered")
 
 st.title("🏠 House Price Prediction")
+
+# Load model directly instead of calling API
+@st.cache_resource
+def load_model():
+    artifact = joblib.load("models/model.pkl")
+    return artifact["pipeline"], artifact["columns"]
+
+pipeline, train_columns = load_model()
 
 MSSubClass = st.number_input("MSSubClass", value=20)
 LotArea = st.number_input("LotArea", value=8000)
@@ -35,8 +39,8 @@ if st.button("🚀 Predict Price"):
         "OverallCond": OverallCond,
         "YearBuilt": YearBuilt,
         "TotalBsmtSF": TotalBsmtSF,
-        "FirstFlrSF": FirstFlrSF,
-        "SecondFlrSF": SecondFlrSF,
+        "1stFlrSF": FirstFlrSF,
+        "2ndFlrSF": SecondFlrSF,
         "FullBath": FullBath,
         "BedroomAbvGr": BedroomAbvGr,
         "TotRmsAbvGrd": TotRmsAbvGrd,
@@ -46,18 +50,18 @@ if st.button("🚀 Predict Price"):
     }
 
     try:
-        response = requests.post(
-            "http://127.0.0.1:8000/predict",
-            json=data
-        )
+        df = pd.DataFrame([data])
 
-        if response.status_code == 200:
-            result = response.json()
-            if "price" in result:
-                st.success(f"💰 Estimated Price: ${result['price']:,.2f}")
-            else:
-                st.error(result)
-        else:
-            st.error("API error")
+        # Add missing columns
+        for col in train_columns:
+            if col not in df.columns:
+                df[col] = np.nan
+
+        df = df[train_columns]
+
+        pred = pipeline.predict(df)[0]
+        price = float(np.expm1(pred))
+
+        st.success(f"💰 Estimated Price: ${price:,.2f}")
     except Exception as e:
         st.error(f"Prediction error: {e}")
