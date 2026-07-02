@@ -45,18 +45,19 @@ if st.button("🚀 Predict Price"):
         "YrSold": YrSold
     }
 
-    response = requests.post(
-        "http://127.0.0.1:8000/predict",
-        json=data
-    )
+    try:
+        response = requests.post(
+            "http://127.0.0.1:8000/predict",
+            json=data
+        )
 
-    if response.status_code == 200:
-        result = response.json()
-        if "price" in result:
-            st.success(f"💰 Estimated Price: ${result['price']:,.2f}")
+        if response.status_code == 200:
+            result = response.json()
+            if "price" in result:
+                st.success(f"💰 Estimated Price: ${result['price']:,.2f}")
+            else:
+                st.error(result)
         else:
-            st.error(result)
-    else:
-        st.error("API error")
+            st.error("API error")
     except Exception as e:
         st.error(f"Prediction error: {e}")
