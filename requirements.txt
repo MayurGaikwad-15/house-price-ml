@@ -2,10 +2,15 @@ pandas
 numpy
 scipy
 scikit-learn
+joblib
 
 matplotlib
 seaborn
+plotly
 
 xgboost
 catboost
 lightgbm
+shap
+
+streamlit

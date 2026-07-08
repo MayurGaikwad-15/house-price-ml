@@ -1,0 +1,23 @@
+{
+  "Ridge": {
+    "val_rmse": 0.1356,
+    "val_r2": 0.9014,
+    "cv_rmse": 0.1451,
+    "cv_std": 0.0309,
+    "best": false
+  },
+  "RandomForest": {
+    "val_rmse": 0.1469,
+    "val_r2": 0.8843,
+    "cv_rmse": 0.1441,
+    "cv_std": 0.0188,
+    "best": false
+  },
+  "XGBoost": {
+    "val_rmse": 0.1353,
+    "val_r2": 0.9019,
+    "cv_rmse": 0.128,
+    "cv_std": 0.0155,
+    "best": true
+  }
+}
