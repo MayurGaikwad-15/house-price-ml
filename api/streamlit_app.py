@@ -5,6 +5,13 @@ import joblib
 import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime
+import warnings
+warnings.filterwarnings("ignore")
+try:
+    import shap
+    SHAP_AVAILABLE = True
+except ImportError:
+    SHAP_AVAILABLE = False
 
 # ─────────────────────────────────────────────
 #  Page config  (must be first Streamlit call)
@@ -363,8 +370,31 @@ def load_model():
     artifact = joblib.load("models/model.pkl")
     return artifact["pipeline"], artifact["columns"]
 
-with st.spinner("🔄 Loading intelligence engine…"):
+@st.cache_resource(show_spinner=False)
+def load_shap_explainer():
+    """Load SHAP TreeExplainer from saved model artefact."""
+    if not SHAP_AVAILABLE:
+        return None, None, None
+    try:
+        artifact      = joblib.load("models/model.pkl")
+        pipeline      = artifact["pipeline"]
+        X_train_trans = artifact.get("X_train_trans", None)
+        feature_names = artifact.get("feature_names", [])
+        model_name    = artifact.get("best_model_name", "")
+        raw_model     = pipeline.named_steps["model"]
+        if X_train_trans is not None and hasattr(X_train_trans, "toarray"):
+            X_train_trans = X_train_trans.toarray()
+        if model_name in ("RandomForest", "XGBoost"):
+            explainer = shap.TreeExplainer(raw_model)
+        else:
+            explainer = shap.LinearExplainer(raw_model, X_train_trans)
+        return explainer, feature_names, pipeline
+    except Exception:
+        return None, None, None
+
+with st.spinner("Loading intelligence engine…"):
     pipeline, train_columns = load_model()
+    shap_explainer, shap_feature_names, shap_pipeline = load_shap_explainer()
 
 
 # ─────────────────────────────────────────────
@@ -509,6 +539,79 @@ def build_comparable_bar(price: float):
         font=dict(family="Inter"),
     )
     return fig
+
+
+def build_shap_waterfall(input_df: pd.DataFrame) -> go.Figure | None:
+    """Compute SHAP values for a single row and return a Plotly waterfall chart."""
+    if shap_explainer is None or shap_pipeline is None:
+        return None
+    try:
+        preprocessor = shap_pipeline.named_steps["preprocessor"]
+        X_trans      = preprocessor.transform(input_df)
+        if hasattr(X_trans, "toarray"):
+            X_trans = X_trans.toarray()
+        shap_vals = shap_explainer.shap_values(X_trans)   # shape (1, n_features)
+        if isinstance(shap_vals, list):          # RF multi-output edge case
+            shap_vals = shap_vals[0]
+        sv   = shap_vals[0]                      # 1-D array
+        base = float(shap_explainer.expected_value
+                     if not isinstance(shap_explainer.expected_value, np.ndarray)
+                     else shap_explainer.expected_value[0])
+
+        # Top-N by absolute magnitude
+        TOP = 14
+        names = shap_feature_names if shap_feature_names else [f"f{i}" for i in range(len(sv))]
+        idx   = np.argsort(np.abs(sv))[-TOP:][::-1]
+        top_names = [names[i] for i in idx]
+        top_vals  = sv[idx].tolist()
+
+        # Build Plotly waterfall
+        colors = ["#6366f1" if v >= 0 else "#06b6d4" for v in top_vals]
+
+        fig = go.Figure(go.Bar(
+            x=top_vals,
+            y=top_names,
+            orientation="h",
+            marker=dict(
+                color=colors,
+                opacity=0.88,
+                line=dict(width=0),
+            ),
+            text=[f"+{v:.4f}" if v >= 0 else f"{v:.4f}" for v in top_vals],
+            textposition="outside",
+            textfont=dict(size=9.5, color="#94a3b8", family="Inter"),
+            hovertemplate="<b>%{y}</b><br>SHAP: %{x:.5f}<extra></extra>",
+        ))
+        fig.add_vline(x=0, line_color="rgba(255,255,255,0.15)", line_width=1)
+        fig.update_layout(
+            height=420,
+            margin=dict(l=10, r=60, t=10, b=10),
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            xaxis=dict(
+                title="SHAP value (impact on log-price)",
+                titlefont=dict(color="#64748b", size=10),
+                tickfont=dict(color="#64748b", size=9),
+                showgrid=True, gridcolor="rgba(255,255,255,0.06)", zeroline=False,
+            ),
+            yaxis=dict(
+                tickfont=dict(color="#f1f5f9", size=10.5),
+                autorange="reversed",
+            ),
+            font=dict(family="Inter"),
+            annotations=[
+                dict(
+                    x=0.5, y=1.04, xref="paper", yref="paper",
+                    text=f"Baseline (avg log-price): {base:.3f}  →  Indigo = pushes price UP   Cyan = pushes price DOWN",
+                    showarrow=False,
+                    font=dict(size=10, color="#64748b", family="Inter"),
+                    align="center",
+                )
+            ],
+        )
+        return fig
+    except Exception:
+        return None
 
 
 # ─────────────────────────────────────────────
@@ -734,8 +837,9 @@ if st.session_state.prediction:
     """, unsafe_allow_html=True)
 
     # ── Tabs: Analytics ──────────────────────
-    tab1, tab2, tab3, tab4 = st.tabs(
-        ["📊  Market Gauge", "🕸  Property Radar", "🍩  Cost Breakdown", "📈  Comparables"]
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(
+        ["📊  Market Gauge", "🕸  Property Radar", "🍩  Cost Breakdown",
+         "📈  Comparables", "🔍  SHAP Explainer"]
     )
 
     with tab1:
@@ -788,6 +892,68 @@ if st.session_state.prediction:
             build_comparable_bar(price),
             use_container_width=True, config={"displayModeBar": False}
         )
+
+    # ── Tab 5: SHAP Explainer ─────────────────
+    with tab5:
+        if not SHAP_AVAILABLE:
+            st.warning("SHAP library not installed. Run: pip install shap")
+        elif shap_explainer is None:
+            st.warning("SHAP explainer could not load. Re-run `python -m src.train` to rebuild model artefact.")
+        else:
+            # Build input DataFrame exactly as prediction logic does
+            _input_data = {
+                "MSSubClass":   st.session_state.prediction["inputs"]["MSSubClass"],
+                "LotArea":      st.session_state.prediction["inputs"]["LotArea"],
+                "OverallQual":  st.session_state.prediction["inputs"]["OverallQual"],
+                "OverallCond":  st.session_state.prediction["inputs"]["OverallCond"],
+                "YearBuilt":    st.session_state.prediction["inputs"]["YearBuilt"],
+                "TotalBsmtSF":  st.session_state.prediction["inputs"]["TotalBsmtSF"],
+                "1stFlrSF":     st.session_state.prediction["inputs"]["1stFlrSF"],
+                "2ndFlrSF":     st.session_state.prediction["inputs"]["2ndFlrSF"],
+                "FullBath":     st.session_state.prediction["inputs"]["FullBath"],
+                "BedroomAbvGr": st.session_state.prediction["inputs"]["BedroomAbvGr"],
+                "TotRmsAbvGrd": st.session_state.prediction["inputs"]["TotRmsAbvGrd"],
+                "GarageCars":   st.session_state.prediction["inputs"]["GarageCars"],
+                "GarageArea":   st.session_state.prediction["inputs"]["GarageArea"],
+                "YrSold":       st.session_state.prediction["inputs"]["YrSold"],
+            }
+            _df = pd.DataFrame([_input_data])
+            for _col in train_columns:
+                if _col not in _df.columns:
+                    _df[_col] = np.nan
+            _df = _df[train_columns]
+
+            wf_fig = build_shap_waterfall(_df)
+
+            st.markdown("""
+            <div class="section-title" style="margin-bottom:0.4rem;">🔍 Local Explanation — This Prediction</div>
+            <p style="font-size:0.78rem; color:#64748b; margin-bottom:1rem;">
+                Each bar shows how much that feature <strong style="color:#6366f1;">raised</strong>
+                (indigo) or <strong style="color:#06b6d4;">lowered</strong> (cyan) the predicted
+                log-price vs. the average house. Top 14 features by absolute impact.
+            </p>
+            """, unsafe_allow_html=True)
+
+            if wf_fig:
+                st.plotly_chart(wf_fig, use_container_width=True,
+                                config={"displayModeBar": False})
+            else:
+                st.error("Could not compute SHAP values for this input.")
+
+            # Global plots
+            import os
+            _sum_path = "reports/figures/shap_summary.png"
+            _bee_path = "reports/figures/shap_beeswarm.png"
+            if os.path.exists(_sum_path) and os.path.exists(_bee_path):
+                st.markdown("<br>", unsafe_allow_html=True)
+                with st.expander("📊  Global Feature Importance (all training data)", expanded=False):
+                    g1, g2 = st.columns(2)
+                    with g1:
+                        st.image(_sum_path, caption="Mean |SHAP| — XGBoost",
+                                 use_container_width=True)
+                    with g2:
+                        st.image(_bee_path, caption="Beeswarm — direction & spread",
+                                 use_container_width=True)
 
     # ── Property summary table ───────────────
     st.markdown("<br>", unsafe_allow_html=True)
